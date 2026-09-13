@@ -446,7 +446,7 @@ async function EventBranch({
               <option value="" disabled>
                 Select...
               </option>
-              {[2, 3, 4, 5].map((n) => (
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
                 <option key={n} value={n}>
                   {n}+
                 </option>
