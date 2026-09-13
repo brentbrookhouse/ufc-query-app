@@ -1,10 +1,10 @@
 import Link from "next/link";
 
 const links = [
-  { href: "/", label: "Fighter Search" },
-  { href: "/methods", label: "Finish-Type Search" },
+  { href: "/", label: "When Was..." },
   { href: "/check", label: "Check a Result" },
-  { href: "/when", label: "When Was..." },
+  { href: "/methods", label: "Finish-Type Search" },
+  { href: "/fighters", label: "Fighter Search" },
 ];
 
 export default function NavBar() {

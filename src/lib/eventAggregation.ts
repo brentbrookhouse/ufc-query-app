@@ -137,3 +137,24 @@ export async function findRecentQualifyingEvents(
   }
   return { events: groupAndFilter(data, threshold, limit), error: null };
 }
+
+// Total count of qualifying events across ALL of history — deliberately
+// NOT the windowed early-stopping search above. An accurate total can't
+// stop early the way "find the 5 most recent" can, so this always fetches
+// every fight matching the category (worst case ~4,050 rows for Decision,
+// against a ~9k-row table), same fetchAllRows pagination as everywhere
+// else, just with no upper bound on how much of it gets scanned. Cheap in
+// absolute terms at this dataset's size, but a real full-category scan
+// every call, not a bounded search — never silently substitute the
+// windowed version here, which would undercount.
+export async function countQualifyingEvents(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  category: MacroCategory,
+  threshold: number,
+): Promise<{ count: number; error: string | null }> {
+  const { data, error } = await fetchMacroRowsSince(supabase, category, null);
+  if (error) {
+    return { count: 0, error };
+  }
+  return { count: groupAndFilter(data, threshold, Infinity).length, error: null };
+}
