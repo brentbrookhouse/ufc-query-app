@@ -103,6 +103,17 @@ export function getMacroCategory(method: string): MacroCategory {
   return "Other";
 }
 
+// The prefixes behind a macro category, for building a SQL-side superset
+// filter (see fetchByMacroCategory) — the same table getMacroCategory
+// itself reads, so the two can't drift apart. "Other" has no defined
+// prefix list (it's everything left over), so this returns null for it.
+export function getMacroCategoryPrefixes(
+  category: MacroCategory,
+): string[] | null {
+  const entry = MACRO_CATEGORY_PREFIXES.find((e) => e.category === category);
+  return entry ? entry.prefixes : null;
+}
+
 // ASCII Unit Separator — a control character with essentially zero chance
 // of appearing in real finish-text — used to pack a MethodGroup's
 // possibly-multiple rawMethods into a single HTML checkbox `value`.

@@ -10,8 +10,12 @@ import {
   groupKeyFor,
 } from "@/lib/methodGrouping";
 import type { MacroCategory, MethodGroup } from "@/lib/methodGrouping";
+import { fetchByMacroCategory } from "@/lib/macroLookup";
 import { lookupMethodGroups } from "@/lib/methodLookup";
-import { isComparableFinishTime, parseTimeToSeconds } from "@/lib/methodTiming";
+import {
+  isComparableFinishTime,
+  totalElapsedSeconds,
+} from "@/lib/methodTiming";
 import { paramToArray } from "@/lib/search";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { createClient } from "@/lib/supabase/server";
@@ -37,23 +41,76 @@ function latestDate(fights: Fight[]): string | null {
 }
 
 type TimingRecord = { fastest: Fight; slowest: Fight };
+type RankInfo = { rank: number; tied: boolean };
+
+// Single shared definition of "which fights are safe to compare, and what
+// their elapsed time is" — used by both fastestSlowest and rankBySpeed, so
+// the two can't apply the comparability rule differently.
+function comparableWithElapsed(
+  matches: Fight[],
+): { fight: Fight; elapsed: number }[] {
+  return matches
+    .filter((f) => isComparableFinishTime(f.round, f.time))
+    .map((f) => ({
+      fight: f,
+      elapsed: totalElapsedSeconds(f.round!, f.time!),
+    }));
+}
 
 function fastestSlowest(matches: Fight[]): TimingRecord | null {
-  const comparable = matches.filter((f) =>
-    isComparableFinishTime(f.round, f.time),
-  );
+  const comparable = comparableWithElapsed(matches);
   if (comparable.length === 0) {
     return null;
   }
 
   let fastest = comparable[0];
   let slowest = comparable[0];
-  for (const f of comparable) {
-    const seconds = parseTimeToSeconds(f.time)!;
-    if (seconds < parseTimeToSeconds(fastest.time)!) fastest = f;
-    if (seconds > parseTimeToSeconds(slowest.time)!) slowest = f;
+  for (const c of comparable) {
+    if (c.elapsed < fastest.elapsed) fastest = c;
+    if (c.elapsed > slowest.elapsed) slowest = c;
   }
-  return { fastest, slowest };
+  return { fastest: fastest.fight, slowest: slowest.fight };
+}
+
+// Where the entered result would rank by speed if inserted into this
+// pool's history, sorted fastest to slowest. rank = count of strictly
+// faster historical fights + 1. `tied` flags whether any historical fight
+// exactly matches the entered elapsed time, so the wording layer (not
+// this function) decides how to phrase a tie rather than this picking an
+// arbitrary rank among the tied group. Returns null when the pool has no
+// comparable historical fights at all — "1st fastest ever" would be
+// vacuously true but misleading when there's nothing to actually compare
+// against.
+function rankBySpeed(matches: Fight[], enteredElapsed: number): RankInfo | null {
+  const comparable = comparableWithElapsed(matches);
+  if (comparable.length === 0) {
+    return null;
+  }
+
+  let faster = 0;
+  let tied = 0;
+  for (const c of comparable) {
+    if (c.elapsed < enteredElapsed) faster++;
+    else if (c.elapsed === enteredElapsed) tied++;
+  }
+  return { rank: faster + 1, tied: tied > 0 };
+}
+
+// Absorbs the old binary "new record?" check into the rank itself, rather
+// than showing both as separate, possibly-redundant statements: rank 1
+// with no tie reads as a new record; rank 1 with a tie reads as tying one
+// (the record isn't broken, just matched); anything else reads as a
+// plain ordinal, tie-aware.
+function rankMessage(info: RankInfo, scopeLabel: string, subjectLabel: string): string {
+  if (info.rank === 1) {
+    return info.tied
+      ? `This would tie for the fastest ${subjectLabel} in ${scopeLabel} history.`
+      : `This would be a new fastest ${subjectLabel} in ${scopeLabel} history.`;
+  }
+  const ord = ordinal(info.rank);
+  return info.tied
+    ? `This would be tied for ${ord} fastest ${subjectLabel} in ${scopeLabel} history.`
+    : `This would be the ${ord} fastest ${subjectLabel} in ${scopeLabel} history.`;
 }
 
 type StreakInfo = { type: "win" | "loss" | "none"; length: number };
@@ -119,13 +176,111 @@ function methodHistoryLine(
   const subject =
     techniqueCount > 1 ? `any of these ${techniqueCount} methods` : singleLabel;
   if (count === 0) {
-    return `${name} has never ${verb} by ${subject} before.`;
+    return `${name} has never ${verb} by ${subject} in the UFC before.`;
   }
-  return `${name} has ${verb} by ${subject} ${count} time${count === 1 ? "" : "s"} before.`;
+  return `${name} has ${verb} by ${subject} in the UFC ${count} time${count === 1 ? "" : "s"} before.`;
 }
 
 function recordLine(label: string, fight: Fight): string {
   return `${label}: ${fight.time} (round ${fight.round}) — ${fight.fighter_a} vs ${fight.fighter_b}, ${formatDate(fight.event_date)}`;
+}
+
+const TIMING_CAPTION =
+  "Based on time elapsed within the finishing round; excludes fights recorded under non-standard round lengths (mostly pre-2000 UFC) and decisions/draws that went the distance.";
+
+// Shared rendering for one Fastest/Slowest block (macro-level or
+// micro-level) — UFC-wide + division records, plus an optional "does the
+// entered time beat this" line. When `suppressedNote` is set, the record
+// blocks are replaced with that note instead (used when there's no single
+// honest category/technique to report against — a multi-category
+// selection, or the "Other" catch-all with no defined query pattern).
+function TimingSection({
+  title,
+  suppressedNote,
+  ufcWide,
+  division,
+  divisionLabel,
+  ufcWideRank,
+  divisionRank,
+  enteredTimeDisplay,
+  subjectLabel,
+}: {
+  title: string;
+  suppressedNote?: string;
+  ufcWide: TimingRecord | null;
+  division: TimingRecord | null;
+  divisionLabel: string;
+  ufcWideRank: RankInfo | null;
+  divisionRank: RankInfo | null;
+  enteredTimeDisplay: string | null;
+  subjectLabel: string;
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+        {title}
+      </h2>
+      <p className="text-xs text-zinc-500 dark:text-zinc-500">
+        {TIMING_CAPTION}
+      </p>
+
+      {suppressedNote ? (
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
+          {suppressedNote}
+        </p>
+      ) : (
+        <>
+          {enteredTimeDisplay && (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Entered time: {enteredTimeDisplay}
+            </p>
+          )}
+
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              UFC-wide
+            </p>
+            {ufcWide ? (
+              <ul className="text-sm text-zinc-700 dark:text-zinc-300">
+                <li>{recordLine("Fastest", ufcWide.fastest)}</li>
+                <li>{recordLine("Slowest", ufcWide.slowest)}</li>
+              </ul>
+            ) : (
+              <p className="text-sm text-zinc-500 dark:text-zinc-500">
+                No comparable historical timing data.
+              </p>
+            )}
+            {ufcWideRank && (
+              <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                {rankMessage(ufcWideRank, "UFC", subjectLabel)}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {divisionLabel}
+            </p>
+            {division ? (
+              <ul className="text-sm text-zinc-700 dark:text-zinc-300">
+                <li>{recordLine("Fastest", division.fastest)}</li>
+                <li>{recordLine("Slowest", division.slowest)}</li>
+              </ul>
+            ) : (
+              <p className="text-sm text-zinc-500 dark:text-zinc-500">
+                No comparable historical timing data.
+              </p>
+            )}
+            {divisionRank && (
+              <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                {rankMessage(divisionRank, divisionLabel, subjectLabel)}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 type ResolutionState = "resolved" | "multiple" | "zero";
@@ -150,6 +305,10 @@ export default async function CheckResult({
     roundParsed !== null && Number.isInteger(roundParsed) && roundParsed > 0
       ? roundParsed
       : null;
+
+  const enteredElapsedSeconds = isComparableFinishTime(round, time)
+    ? totalElapsedSeconds(round!, time!)
+    : null;
 
   const coreFieldsPresent = Boolean(
     winner && loser && weightClass && term && date,
@@ -183,6 +342,12 @@ export default async function CheckResult({
   let divisionLatest: string | null = null;
   let ufcWideTiming: TimingRecord | null = null;
   let divisionTiming: TimingRecord | null = null;
+  let macroUfcWideTiming: TimingRecord | null = null;
+  let macroDivisionTiming: TimingRecord | null = null;
+  let ufcWideRank: RankInfo | null = null;
+  let divisionRank: RankInfo | null = null;
+  let macroUfcWideRank: RankInfo | null = null;
+  let macroDivisionRank: RankInfo | null = null;
 
   let winnerStreakMessage = "";
   let loserStreakMessage = "";
@@ -230,24 +395,41 @@ export default async function CheckResult({
       macros = new Set(candidates.map(getMacroCategory));
       microKeys = new Set(candidates.map(groupKeyFor));
 
-      const [methodMatchesResult, winnerHistoryResult, loserHistoryResult] =
-        await Promise.all([
-          fetchAllRows<Fight>((from, to) =>
-            supabase
-              .from("fights")
-              .select("*")
-              .in("method", candidates!)
-              .lt("event_date", date)
-              .range(from, to),
-          ),
-          fetchFighterHistory(supabase, winner, date),
-          fetchFighterHistory(supabase, loser, date),
-        ]);
+      // The macro-level Fastest/Slowest section only has a single honest
+      // category to query when the selection resolves to exactly one
+      // (same "suppress, don't guess" rule as check #4's macro history
+      // lines) and that category isn't the "Other" catch-all, which has
+      // no defined prefix list to build a safe query from.
+      const singleMacro = macros.size === 1 ? Array.from(macros)[0] : null;
+      const macroQueryCategory =
+        singleMacro && singleMacro !== "Other" ? singleMacro : null;
+
+      const [
+        methodMatchesResult,
+        winnerHistoryResult,
+        loserHistoryResult,
+        macroMatchesResult,
+      ] = await Promise.all([
+        fetchAllRows<Fight>((from, to) =>
+          supabase
+            .from("fights")
+            .select("*")
+            .in("method", candidates!)
+            .lt("event_date", date)
+            .range(from, to),
+        ),
+        fetchFighterHistory(supabase, winner, date),
+        fetchFighterHistory(supabase, loser, date),
+        macroQueryCategory
+          ? fetchByMacroCategory(supabase, macroQueryCategory, date)
+          : Promise.resolve({ data: [] as Fight[], error: null }),
+      ]);
 
       const firstError =
         methodMatchesResult.error ??
         winnerHistoryResult.error ??
-        loserHistoryResult.error;
+        loserHistoryResult.error ??
+        macroMatchesResult.error;
 
       if (firstError) {
         errorMessage = firstError;
@@ -263,6 +445,23 @@ export default async function CheckResult({
         divisionLatest = latestDate(divisionMatches);
         ufcWideTiming = fastestSlowest(methodMatches);
         divisionTiming = fastestSlowest(divisionMatches);
+
+        const macroMatches = macroMatchesResult.data;
+        const macroDivisionMatches = macroMatches.filter(
+          (f) => f.weight_class === weightClass,
+        );
+        macroUfcWideTiming = fastestSlowest(macroMatches);
+        macroDivisionTiming = fastestSlowest(macroDivisionMatches);
+
+        if (enteredElapsedSeconds !== null) {
+          ufcWideRank = rankBySpeed(methodMatches, enteredElapsedSeconds);
+          divisionRank = rankBySpeed(divisionMatches, enteredElapsedSeconds);
+          macroUfcWideRank = rankBySpeed(macroMatches, enteredElapsedSeconds);
+          macroDivisionRank = rankBySpeed(
+            macroDivisionMatches,
+            enteredElapsedSeconds,
+          );
+        }
 
         const winnerHistory = winnerHistoryResult.data;
         const loserHistory = loserHistoryResult.data;
@@ -307,10 +506,6 @@ export default async function CheckResult({
       }
     }
   }
-
-  const enteredSeconds = isComparableFinishTime(round, time)
-    ? parseTimeToSeconds(time)
-    : null;
 
   const primaryMicroKey =
     microKeys.size >= 1 ? Array.from(microKeys)[0] : "";
@@ -559,58 +754,42 @@ export default async function CheckResult({
               </p>
             </section>
 
-            <section className="flex flex-col gap-2">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                Fastest / Slowest
-              </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-500">
-                Based on time elapsed within the finishing round; excludes
-                fights recorded under non-standard round lengths (mostly
-                pre-2000 UFC) and decisions/draws that went the distance.
-              </p>
+            <TimingSection
+              title={`Fastest / Slowest — ${
+                primaryMacro
+                  ? `${primaryMacro} (any technique)`
+                  : "combined categories"
+              }`}
+              suppressedNote={
+                macros.size > 1
+                  ? `Selected methods span multiple categories (${Array.from(macros).sort().join(", ")}) — category-level fastest/slowest not shown.`
+                  : primaryMacro === "Other"
+                    ? 'Category-level timing comparison isn\'t available for the "Other" category.'
+                    : undefined
+              }
+              ufcWide={macroUfcWideTiming}
+              division={macroDivisionTiming}
+              divisionLabel={weightClass}
+              ufcWideRank={macroUfcWideRank}
+              divisionRank={macroDivisionRank}
+              enteredTimeDisplay={time}
+              subjectLabel={primaryMacro ?? "this category"}
+            />
 
-              <div>
-                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                  UFC-wide
-                </p>
-                {ufcWideTiming ? (
-                  <ul className="text-sm text-zinc-700 dark:text-zinc-300">
-                    <li>{recordLine("Fastest", ufcWideTiming.fastest)}</li>
-                    <li>{recordLine("Slowest", ufcWideTiming.slowest)}</li>
-                  </ul>
-                ) : (
-                  <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                    No comparable historical timing data.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                  {weightClass}
-                </p>
-                {divisionTiming ? (
-                  <ul className="text-sm text-zinc-700 dark:text-zinc-300">
-                    <li>{recordLine("Fastest", divisionTiming.fastest)}</li>
-                    <li>{recordLine("Slowest", divisionTiming.slowest)}</li>
-                  </ul>
-                ) : (
-                  <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                    No comparable historical timing data.
-                  </p>
-                )}
-              </div>
-
-              {enteredSeconds !== null && ufcWideTiming && (
-                <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                  Entered time ({time}):{" "}
-                  {enteredSeconds <
-                  parseTimeToSeconds(ufcWideTiming.fastest.time)!
-                    ? `would be a new UFC-wide fastest for ${microKeys.size > 1 ? "these methods" : "this technique"}.`
-                    : "does not beat the current UFC-wide fastest."}
-                </p>
-              )}
-            </section>
+            <TimingSection
+              title={`Fastest / Slowest — ${
+                microKeys.size > 1
+                  ? `combined selection (${microKeys.size} methods)`
+                  : primaryMicroKey
+              }`}
+              ufcWide={ufcWideTiming}
+              division={divisionTiming}
+              divisionLabel={weightClass}
+              ufcWideRank={ufcWideRank}
+              divisionRank={divisionRank}
+              enteredTimeDisplay={time}
+              subjectLabel={microKeys.size > 1 ? "these methods" : primaryMicroKey}
+            />
 
             <section className="flex flex-col gap-2">
               <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
