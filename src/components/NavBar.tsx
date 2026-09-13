@@ -4,6 +4,7 @@ const links = [
   { href: "/", label: "Fighter Search" },
   { href: "/methods", label: "Finish-Type Search" },
   { href: "/check", label: "Check a Result" },
+  { href: "/when", label: "When Was..." },
 ];
 
 export default function NavBar() {
