@@ -197,3 +197,54 @@ Confirm scope and priority features directly with the user before building
 out a large surface area — start with a simple, working search + results
 table, then layer in more specific query tools based on what's actually
 useful in practice.
+
+## Future item: technique-family groupings (not started, documented for later)
+
+Everything built so far that merges method strings (the Submission /
+Technical Submission / Verbal Submission prefix-merge, the checkbox
+multi-select) works because the merge rule is purely **mechanical** — the
+strings being merged are identical except for a prefix that's known in
+advance to not matter. That's a fundamentally easier problem than what's
+being described here.
+
+**The actual want**: group techniques into broader families regardless of
+name — e.g. every choke together (rear-naked, guillotine, triangle,
+arm-triangle, north-south, etc.), every leg lock together (heel hook,
+kneebar, straight ankle lock, etc.), possibly every strikes-based stoppage
+together (KO/TKO). This is **not** derivable from the text itself the way
+the prefix-merge was — there's no substring or pattern that tells you a
+guillotine and a rear-naked choke are both "chokes." It requires an actual
+manually-built lookup table (technique name → family), informed by real
+knowledge of the techniques, not pattern-matching.
+
+**What this would take**:
+1. Pull every distinct micro-level technique string currently in the
+   dataset (reuse the existing groupKeyFor-based grouping to get the
+   clean list, not raw method strings).
+2. Manually assign each one to a family. Rough starting taxonomy to refine,
+   not a final answer:
+   - **Chokes**: rear-naked choke, guillotine choke, triangle choke (and
+     its variants), arm-triangle choke (and its variants), north-south
+     choke, anaconda choke, D'arce choke, peruvian necktie, etc.
+   - **Joint locks / leg locks**: armbar, kimura, americana, heel hook,
+     kneebar, straight ankle lock, calf slicer, etc.
+   - **Strikes-based stoppages**: KO, TKO (already its own macro category)
+   - **Positional/combo submissions**: the existing combo finishes
+     (triangle armbar, reverse triangle and kimura, etc.) may need
+     case-by-case judgment calls — e.g. does "triangle armbar" count as a
+     choke, a joint lock, or its own thing? No mechanical rule decides
+     this, a human has to.
+3. Build this as a new lookup layer sitting *above* the existing
+   groupKeyFor/getMacroCategory system, not replacing it — the existing
+   micro/macro levels stay useful on their own (someone may still want
+   "just guillotines," not just "all chokes"). This becomes a third,
+   broader tier: micro technique → family → macro category.
+4. Decide how this interacts with the multi-select and rarity/history/
+   timing checks already built — likely a family selection should behave
+   like a pre-checked multi-select of every technique in that family,
+   reusing the existing "how do the four checks handle multiple selected
+   micro-keys" logic already built for manual multi-select, rather than
+   inventing new comparison logic.
+
+Not started. Documented here so the reasoning and rough shape doesn't need
+to be re-derived when this gets picked up later.

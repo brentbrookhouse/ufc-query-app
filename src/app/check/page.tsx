@@ -50,7 +50,7 @@ function comparableWithElapsed(
   matches: Fight[],
 ): { fight: Fight; elapsed: number }[] {
   return matches
-    .filter((f) => isComparableFinishTime(f.round, f.time))
+    .filter((f) => isComparableFinishTime(f.event_date, f.round, f.time))
     .map((f) => ({
       fight: f,
       elapsed: totalElapsedSeconds(f.round!, f.time!),
@@ -186,7 +186,7 @@ function recordLine(label: string, fight: Fight): string {
 }
 
 const TIMING_CAPTION =
-  "Based on time elapsed within the finishing round; excludes fights recorded under non-standard round lengths (mostly pre-2000 UFC) and decisions/draws that went the distance.";
+  "Records reflect fights from UFC 28 (Nov 17, 2000) onward, matching UFC's own official record-keeping convention — earlier events predate the Unified Rules of MMA and standardized round structure. Based on time elapsed within the finishing round; also excludes decisions/draws that went the distance.";
 
 // Shared rendering for one Fastest/Slowest block (macro-level or
 // micro-level) — UFC-wide + division records, plus an optional "does the
@@ -306,7 +306,7 @@ export default async function CheckResult({
       ? roundParsed
       : null;
 
-  const enteredElapsedSeconds = isComparableFinishTime(round, time)
+  const enteredElapsedSeconds = isComparableFinishTime(date, round, time)
     ? totalElapsedSeconds(round!, time!)
     : null;
 
