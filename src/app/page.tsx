@@ -422,6 +422,10 @@ async function EventBranch({
         errorMessage = result.error;
       } else {
         totalCount = result.count;
+        // Listing every qualifying event (each expandable to see its
+        // fights) is only useful when there aren't too many to scroll
+        // through — above that, the count alone is the answer.
+        events = result.count <= 20 ? result.events : [];
       }
     }
   }
@@ -446,7 +450,7 @@ async function EventBranch({
               <option value="" disabled>
                 Select...
               </option>
-              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => (
                 <option key={n} value={n}>
                   {n}+
                 </option>
@@ -519,11 +523,41 @@ async function EventBranch({
       )}
 
       {submitted && !errorMessage && mode === "count" && totalCount !== null && (
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">
-          {totalCount === 0
-            ? `No event in UFC history has had ${threshold}+ ${categoryLabel}.`
-            : `${totalCount} event${totalCount === 1 ? " has" : "s have"} had ${threshold}+ ${categoryLabel} in UFC history.`}
-        </p>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            {totalCount === 0
+              ? `No event in UFC history has had ${threshold}+ ${categoryLabel}.`
+              : `${totalCount} event${totalCount === 1 ? " has" : "s have"} had ${threshold}+ ${categoryLabel} in UFC history.`}
+          </p>
+
+          {events.length > 0 && (
+            <ul className="flex flex-col gap-2">
+              {events.map((event) => (
+                <li
+                  key={`${event.eventDate}__${event.event}`}
+                  className="rounded border border-zinc-200 dark:border-zinc-800"
+                >
+                  <details>
+                    <summary className="cursor-pointer px-3 py-2 text-sm">
+                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                        {event.event}
+                      </span>{" "}
+                      <span className="text-zinc-600 dark:text-zinc-400">
+                        — {formatDate(event.eventDate)} —{" "}
+                        {event.matchingFights.length} {categoryLabel}
+                      </span>
+                    </summary>
+                    <ul className="border-t border-zinc-200 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+                      {event.matchingFights.map((f) => (
+                        <li key={f.id}>{fightSummaryLine(f)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </>
   );

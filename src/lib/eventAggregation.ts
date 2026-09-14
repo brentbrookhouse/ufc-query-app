@@ -151,10 +151,11 @@ export async function countQualifyingEvents(
   supabase: Awaited<ReturnType<typeof createClient>>,
   category: MacroCategory,
   threshold: number,
-): Promise<{ count: number; error: string | null }> {
+): Promise<{ count: number; events: EventMatch[]; error: string | null }> {
   const { data, error } = await fetchMacroRowsSince(supabase, category, null);
   if (error) {
-    return { count: 0, error };
+    return { count: 0, events: [], error };
   }
-  return { count: groupAndFilter(data, threshold, Infinity).length, error: null };
+  const events = groupAndFilter(data, threshold, Infinity);
+  return { count: events.length, events, error: null };
 }
