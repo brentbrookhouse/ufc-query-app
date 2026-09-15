@@ -14,15 +14,19 @@ export const LEADERBOARD_MACRO_CATEGORIES: MacroCategory[] = [
   "Decision",
 ];
 
-// Micro-level ("specific technique") only means something for KO/TKO and
-// Submission — groupKeyFor only strips down submission-style prefixes to
-// their technique text; a Decision's "method" is its exact scorecard
-// string (e.g. "Decision (unanimous) (29–28, 29–28, 29–28)"), which is
-// judging arithmetic, not a technique. Ranking fighters by how often they
-// coincidentally drew the same scorecard isn't a "specific technique"
-// fact, so Decision (and DQ/NC/Other) are excluded from the micro
-// leaderboards entirely, even though they're part of the macro ones.
-export const MICRO_LEADERBOARD_MACRO_CATEGORIES: MacroCategory[] = ["KO/TKO", "Submission"];
+// Micro-level ("specific technique") only means something for Submission.
+// Two unrelated reasons converge on the same exclusion for the other
+// categories: a Decision's "method" is its exact scorecard string (e.g.
+// "Decision (unanimous) (29–28, 29–28, 29–28)"), which is judging
+// arithmetic, not a technique — ranking fighters by how often they
+// coincidentally drew the same scorecard isn't a real fact. And KO/TKO,
+// even though groupKeyFor does reduce it to real technique-shaped text
+// (e.g. "TKO (punches)"), isn't a distinction the sport actually tracks
+// as a stat the way submission technique is — "most wins by TKO
+// (punches)" isn't a recognized record anyone follows, unlike "most
+// wins by rear-naked choke." So only Submission gets a micro-level
+// leaderboard; KO/TKO and Decision stay macro-only.
+export const MICRO_LEADERBOARD_MACRO_CATEGORIES: MacroCategory[] = ["Submission"];
 
 // Every fight in the dataset before `beforeDate`, unfiltered — the base
 // data every win-count leaderboard below is built from. The table is only
